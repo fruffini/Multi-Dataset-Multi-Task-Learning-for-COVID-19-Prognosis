@@ -1,82 +1,97 @@
+"""
+Step 1 of BRIXIA preprocessing — DICOM to image conversion.
+
+Reads all DICOM files from data/BRIXIA/dicom_clean/, applies photometric
+correction (MONOCHROME1 inversion), and saves each image as a TIFF under
+data/BRIXIA/images/ using a multiprocessing pool.
+
+Expected input layout
+---------------------
+data/BRIXIA/
+    dicom_clean/                 ← cleaned DICOM files
+    metadata_global_v2.csv       ← official BRIXIA metadata (separator: ';')
+                                   must contain columns: Filename, PhotometricInterpretation
+
+Output
+------
+data/BRIXIA/images/   ← converted TIFF images (one per DICOM)
+
+Usage
+-----
+    python src/preprocessing/BRIXIA/convertDicom_brixia.py
+    python src/preprocessing/BRIXIA/convertDicom_brixia.py \
+        --data_dir data/BRIXIA --workers 8
+"""
+
+import argparse
 import os
-import pydicom as dicom
+from functools import partial
+from multiprocessing import Pool
+
 import numpy as np
 import pandas as pd
+import pydicom as dicom
 from PIL import Image
-import PIL.ImageOps
-from torchvision import transforms as torch_transforms
-from multiprocessing import Pool
-from functools import partial
+from tqdm import tqdm
 
 
-def convert_dicom_to_image_BRIXIA(image, meta_data, path_to_data, transform=None, extension='.jpg'):
-    """ Preprocesses a dicom image and saves it to disk as jpg
-
-    Args:
-        image (str): Name of the image to process
-        path_to_data (str): Path to the dicom images
-        meta_data (pd.Dataframe): Dataframe containing meta information of BrixIA
-        transform (torchvision.Transforms): Torchvision transform object
-        extension (str): Extension of the image to save
-    """
-
-    dcm = dicom.dcmread(os.path.join(path_to_data, image))
+def convert_single(filename: str, meta: pd.DataFrame, src_dir: str, dst_dir: str) -> None:
+    """Convert one DICOM file to a normalised 16-bit TIFF."""
+    dcm = dicom.dcmread(os.path.join(src_dir, filename))
     img_array = dcm.pixel_array.astype(np.float32)
     min_val, max_val = img_array.min(), img_array.max()
-    """   
-    THIS PART IS LOOSING INFORMATION ABOUT DATA DISTRIBUTION! 
-    max_gray = np.max(img_array)
-    
-    # Scale 16-bit gray values of dicom images
-    if max_gray <= 4095:
-        img_array = (img_array/4095*255).astype(np.uint8)
-    else:
-        img_array = (img_array/65535*255).astype(np.uint8)"""
 
-    interpretation = meta_data.loc[image]['PhotometricInterpretation']
-    if interpretation == 'MONOCHROME1':
-        img = np.interp(img_array, (min_val, max_val), (max_val, min_val))
-        min_val, max_val = img.min(), img.max()
-    image = image.replace('.dcm', extension)
-    """if img.ndim > 2:
-        img = img.mean(axis=2)"""
-    dest_path = path_to_data.replace('dicom_clean', 'images')
-    os.makedirs(dest_path, exist_ok=True)
+    # Invert MONOCHROME1 so that bright = high tissue intensity
+    if meta.loc[filename, "PhotometricInterpretation"] == "MONOCHROME1":
+        img_array = np.interp(img_array, (min_val, max_val), (max_val, min_val))
+        min_val, max_val = img_array.min(), img_array.max()
 
-    # Transaform to Pil
-    img_pil = Image.fromarray(img_array)
+    # Normalise to [0, 65535]
+    if max_val > min_val:
+        img_array = (img_array - min_val) / (max_val - min_val) * 65535
 
-    img_pil.save(os.path.join(dest_path, image))
+    out_name = filename.replace(".dcm", ".tiff")
+    Image.fromarray(img_array.astype(np.uint16)).save(os.path.join(dst_dir, out_name))
 
 
-if __name__ == '__main__':
+def convert_brixia(data_dir: str, workers: int) -> None:
+    src_dir = os.path.join(data_dir, "dicom_clean")
+    dst_dir = os.path.join(data_dir, "images")
+    meta_path = os.path.join(data_dir, "metadata_global_v2.csv")
 
-    print('Started preprossesing of BrixIA')
+    if not os.path.isdir(src_dir):
+        raise FileNotFoundError(f"DICOM directory not found: {src_dir}")
+    if not os.path.exists(meta_path):
+        raise FileNotFoundError(f"Metadata file not found: {meta_path}")
 
-    base_data_folder = '../../../data/BRIXIA'
+    os.makedirs(dst_dir, exist_ok=True)
 
-    path_to_data = os.path.join(base_data_folder ,'dicom_clean')
-    meta_path = os.path.join(base_data_folder, 'metadata_global_v2.csv')
-    meta_data = pd.read_csv(meta_path, sep=';', dtype={'BrixiaScore': str}, index_col='Filename')
+    meta = pd.read_csv(meta_path, sep=";", dtype={"BrixiaScore": str}, index_col="Filename")
+    filenames = sorted(f for f in os.listdir(src_dir) if f.endswith(".dcm"))
 
-    processes = 4
-    size = (512, 512)
+    print(f"Converting {len(filenames)} DICOM files with {workers} workers...")
 
-    transforms = torch_transforms = torch_transforms.Compose([
-        torch_transforms.Resize(size)
-    ])
+    worker_fn = partial(convert_single, meta=meta, src_dir=src_dir, dst_dir=dst_dir)
+    with Pool(processes=workers) as pool:
+        list(tqdm(pool.imap_unordered(worker_fn, filenames), total=len(filenames)))
 
-    images_list = os.listdir(path_to_data)
+    print(f"Done. Images saved to {dst_dir}/")
 
-    pool = Pool(processes=processes)
 
-    wrapper = partial(convert_dicom_to_image_BRIXIA,
-                      meta_data=meta_data,
-                      path_to_data=path_to_data,
-                      transform=transforms,
-                      extension='.tiff')
-
-    result = pool.map_async(wrapper, images_list)
-    result.get()
-
-    print('Finished preprocessing.')
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Convert BRIXIA DICOM files to TIFF images."
+    )
+    parser.add_argument(
+        "--data_dir",
+        default="data/BRIXIA",
+        help="Root directory of the BRIXIA dataset (default: data/BRIXIA).",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=4,
+        help="Number of parallel worker processes (default: 4).",
+    )
+    args = parser.parse_args()
+    convert_brixia(args.data_dir, args.workers)

@@ -1,5 +1,4 @@
 
-root: /mimer/NOBACKUP/groups/naiss2023-6-336/fruffini/COVID-19-MultiTask
 model:
   freezing: False
   model_name: multi

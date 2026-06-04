@@ -14,7 +14,7 @@ EXP_NAME = f"{args.release_number}release"
 
 
 regex = rf"{EXP_NAME}(?!.*32b)"
-path_to_search = "/mimer/NOBACKUP/groups/naiss2023-6-336/fruffini/COVID-19-MultiTask/models"
+path_to_search = "models"
 
 col_names = ["AFC", "brixia_Lung", "brixia_Global", "regression", "Multi_regression", "Multi_Global", "Multi_Lung"]
 

@@ -31,7 +31,7 @@ def mkdir(path: str):
 
 # Parser object for managing input arguments from command line
 parser = argparse.ArgumentParser(description="Configuration File")
-parser.add_argument("--report_dir", help="Report_directory", type=str, default="/mimer/NOBACKUP/groups/naiss2023-6-336/fruffini/COVID-19-MultiTask/reports")
+parser.add_argument("--report_dir", help="Report_directory", type=str, default="reports")
 args = parser.parse_args()
 
 def main():

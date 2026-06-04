@@ -37,7 +37,7 @@ def reportCreation():
             if args.root == 'data_root':
                 experiment_folder = f"reports/{ext_exp}/{str(CV)}/{type_model}_{task_}_{directory_id}"
             elif args.root == 'data_external':
-                experiment_folder = f"/mimer/NOBACKUP/groups/naiss2023-6-336/fruffini/COVID-19-MultiTask/reports/{ext_exp}/{str(CV)}/{type_model}_{task_}_{directory_id}"
+                experiment_folder = f"reports/{ext_exp}/{str(CV)}/{type_model}_{task_}_{directory_id}"
             if not os.path.exists(experiment_folder):
                 print('[MULTI-AFC] =', experiment_folder, 'exist: ', os.path.exists(experiment_folder))
 
